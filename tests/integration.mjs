@@ -34,10 +34,35 @@ try{await start();
  response=await fetch(base+url,{headers:{Cookie:two}});assert.equal(response.status,404,'other buyers must not access private uploads');
  result=await request('/api/state',undefined,two);assert.equal(result.data.launches.length,0);
  await stop();await start();result=await login(buyer1.email,newPassword);assert(result.r.ok);const resumed=result.cookie;result=await request('/api/state',undefined,resumed);assert.equal(result.data.launches.length,1,'launches survive restart');response=await fetch(base+url,{headers:{Cookie:resumed}});assert.deepEqual(Buffer.from(await response.arrayBuffer()),video,'uploads survive restart');
+
+ // Corrections preserve identity/date/count, keep untouched evidence, and enforce ownership.
+ const snapshot=x=>JSON.stringify([x.url,x.platform,x.notes||'',x.files]);
+ let current=(await request('/api/state',undefined,resumed)).data.launches[0];
+ const makeEdit=(record=current)=>{const f=new FormData();f.set('url','https://example.test/corrected');f.set('platform',record.platform);f.set('notes','Corrected link');f.set('version',snapshot(record));f.set('buyerId','2');f.set('productId','2');f.set('day','2099-01-01');return f};
+ const patch=async(f,cookie=resumed,origin=base)=>fetch(base+'/api/launch?id='+launch.id,{method:'PATCH',headers:{Cookie:cookie,Origin:origin},body:f});
+ response=await patch(makeEdit(),two);assert.equal(response.status,404,'a buyer cannot edit another buyer launch');
+ response=await patch(makeEdit(),resumed,'https://untrusted.example');assert.equal(response.status,400);
+ const stale=makeEdit();response=await patch(makeEdit());assert(response.ok,await response.text());
+ current=(await request('/api/state',undefined,resumed)).data.launches[0];
+ assert.equal(current.id,launch.id);assert.equal(current.buyer_id,launch.buyer_id);assert.equal(current.product_id,launch.product_id);assert.equal(current.day,launch.day);assert.equal(current.created,launch.created);assert.equal(current.url,'https://example.test/corrected');assert.equal(current.files,launch.files,'link-only correction keeps all uploaded files');
+ assert.equal((await request('/api/state',undefined,resumed)).data.launches.length,1,'editing never counts as another daily launch');
+ response=await patch(stale);assert.equal(response.status,409,'stale editor must not overwrite a newer correction');
+ let f=makeEdit();f.set('url','javascript:alert(1)');response=await patch(f);assert.equal(response.status,400);
+ f=makeEdit();f.append('remove',files[0].key);response=await patch(f);assert.equal(response.status,400,'at least one creative must remain');
+ assert.equal((await request('/api/state',undefined,resumed)).data.launches[0].files,current.files,'failed validation leaves evidence intact');
+ const replacement=Buffer.from('corrected-video-content');f=makeEdit();f.set('creative',new File([replacement],'corrected.mp4',{type:'video/mp4'}));response=await patch(f);assert(response.ok,await response.text());
+ current=(await request('/api/state',undefined,resumed)).data.launches[0];let editedFiles=JSON.parse(current.files);assert.equal(editedFiles.length,3);assert.equal(editedFiles.filter(x=>x.kind==='creative').length,1);assert(editedFiles.some(x=>x.name==='corrected.mp4'));assert(editedFiles.some(x=>x.key===files[1].key),'untouched screenshots are retained');
+ response=await fetch(base+url,{headers:{Cookie:resumed}});assert.equal(response.status,404,'replaced video is removed');
+ const newVideo=editedFiles.find(x=>x.kind==='creative');response=await fetch(base+'/api/files/file?key='+encodeURIComponent(newVideo.key),{headers:{Cookie:resumed}});assert.deepEqual(Buffer.from(await response.arrayBuffer()),replacement);
+ f=makeEdit();f.set('platform','Meta');response=await patch(f);assert(response.ok,await response.text());current=(await request('/api/state',undefined,resumed)).data.launches[0];assert.equal(JSON.parse(current.files).length,2,'deselected-platform proof is removed');
+ f=makeEdit();f.set('platform','Both');response=await patch(f);assert.equal(response.status,400,'adding a platform requires its screenshot');
+ f=makeEdit();f.set('platform','Both');f.set('tiktok',new File([png],'corrected-tiktok.png',{type:'image/png'}));response=await patch(f);assert(response.ok,await response.text());current=(await request('/api/state',undefined,resumed)).data.launches[0];
+ f=makeEdit();f.set('notes','Leader reviewed correction');response=await patch(f,leader);assert(response.ok,await response.text());
+ current=(await request('/api/state',undefined,resumed)).data.launches[0];assert.equal(current.notes,'Leader reviewed correction');assert.equal(current.created,launch.created);assert.equal(current.day,launch.day);
  result=await login('leader@example.test');leader=result.cookie;result=await request('/api/users',{...buyer1,password:'Reset test password 789!'},leader);assert(result.r.ok);result=await request('/api/state',undefined,resumed);assert(result.data.error,'password reset revokes sessions');
  result=await login(buyer1.email,'Reset test password 789!');assert.equal(result.data.next,'/change-password');
  result=await request('/api/users',{...buyer2,password:'',active:false},leader);assert(result.r.ok);result=await request('/api/state',undefined,two);assert(result.data.error,'paused buyer is denied');
  result=await request('/api/team',{id:2,email:buyer2.email,goal:3,active:true},leader);assert(result.r.ok);result=await login(buyer2.email,newPassword);assert(result.r.ok,'team page reactivation must restore login');
  result=await request('/api/auth/logout',{},leader);assert(result.r.ok);result=await request('/api/state',undefined,leader);assert(result.data.error);
- console.log('PASS: leader setup; direct login; required password change; buyer creation; duplicate email protection; role isolation; CSRF checks; launch evidence validation; duplicate products; file authorization and ranges; restart persistence; password reset; paused access; logout.');
+ console.log('PASS: leader setup; direct login; required password change; buyer creation; duplicate email protection; role isolation; CSRF checks; launch evidence validation; duplicate products; file authorization and ranges; restart persistence; password reset; paused access; logout; launch corrections; unchanged daily counts; evidence replacement; stale-edit protection.');
 }catch(e){console.error(logs.slice(-6000));throw e}finally{await stop();await rm(dir,{recursive:true,force:true})}
