@@ -1,0 +1,1 @@
+import {sameOrigin,signOut} from '../../../../lib/auth';export async function POST(r:Request){try{sameOrigin(r);await signOut();return Response.json({ok:true})}catch{return Response.json({error:'Unable to sign out'},{status:400})}}

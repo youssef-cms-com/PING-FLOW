@@ -1,0 +1,3 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {hashPassword,verifyPassword,validatePassword} from '../lib/password.ts';
+test('salted password hashes verify only the correct password',async()=>{const password='Integration password 123!';const a=await hashPassword(password),b=await hashPassword(password);assert.notEqual(a,b);assert(!a.includes(password));assert(await verifyPassword(password,a));assert(!await verifyPassword('incorrect password',a));assert(!await verifyPassword(password,'invalid'));});
+test('password length limits',()=>{assert.throws(()=>validatePassword('short'));assert.throws(()=>validatePassword('x'.repeat(129)));validatePassword('x'.repeat(12));});

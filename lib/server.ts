@@ -1,0 +1,7 @@
+import {db,database} from './database';
+import {account} from './auth';
+export const names=['Marouan Hakiki','Anouar Benigmim','Mohamed Mazouz','Ossama El Fahssi','Mohamed Oujghi','Abde Ilah Aferyad','Mohammed Kasmy','Youssef Ayoub','Hamza Toughzaoui','Lahcen Ait Lahcen','Hamza Assadi'];
+export function day(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Beirut',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())}
+export function seed(){const sql=database();sql.prepare("INSERT OR IGNORE INTO settings(key,value) VALUES('start',?)").run(day());for(const [i,name] of names.entries())sql.prepare('INSERT OR IGNORE INTO members(id,name) VALUES(?,?)').run(i+1,name)}
+export async function context(){const a=await account();if(!a)throw Error('Sign in with your email and password to continue');if(a.require_change)throw Error('Change your temporary password before continuing');const isLeader=a.role==='leader';const buyer=isLeader?null:await db.prepare('SELECT * FROM members WHERE id=? AND active=1').bind(a.buyer_id).first<any>();if(!isLeader&&!buyer)throw Error('Your buyer account is paused or unassigned');return {db,isLeader,buyer,user:{userId:a.id,email:a.email,displayName:a.name},account:a}}
+export function fail(e:unknown){const message=e instanceof Error?e.message:'Request failed';return Response.json({error:/SQLITE|constraint|UNIQUE/i.test(message)?'This email or product is already assigned':message},{status:400})}
